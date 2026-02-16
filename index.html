@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>豪華拉霸機 - 音效增強版</title>
+    <style>
+        /* CSS 保持不變，延用您的精美樣式 */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb2d);
+            color: white;
+            margin: 0;
+            overflow: hidden;
+        }
+        .slot-machine-container {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            position: relative;
+            border: 4px solid #ffcc00;
+        }
+        h1 { color: #ffcc00; margin-bottom: 10px; text-shadow: 0 0 10px rgba(255, 204, 0, 0.7); }
+        .balance-box { background: #222; padding: 10px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #444; }
+        .balance { font-size: 1.8em; color: #00ffcc; }
+        .reel-container { display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
+        .slot { width: 100px; height: 120px; background: white; border-radius: 10px; overflow: hidden; position: relative; box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.5); border: 3px solid #ffcc00; }
+        .reel-list { list-style: none; padding: 0; margin: 0; position: absolute; top: 0; left: 0; width: 100%; }
+        .reel-list li { height: 120px; display: flex; align-items: center; justify-content: center; font-size: 60px; background: white; color: #333; border-bottom: 1px solid #eee; }
+        .spin-button { background: linear-gradient(to bottom, #ff416c, #ff4b2b); color: white; border: none; padding: 15px 40px; font-size: 1.5em; font-weight: bold; border-radius: 50px; cursor: pointer; box-shadow: 0 5px 0 #990000; transition: all 0.1s; }
+        .spin-button:active { transform: translateY(3px); box-shadow: 0 2px 0 #990000; }
+        .spin-button:disabled { background: #555; box-shadow: 0 5px 0 #333; cursor: not-allowed; }
+        .bet-input { width: 100px; padding: 10px; font-size: 1.2em; border-radius: 5px; text-align: center; margin-bottom: 20px; border: 2px solid #ffcc00; background: #333; color: white; }
+        .result { margin-top: 20px; font-size: 1.5em; min-height: 1.5em; color: #ffcc00; }
+        .rules-note { font-size: 0.8em; color: #aaa; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="slot-machine-container">
+        <h1>💰 豪華拉霸機 💰</h1>
+        
+        <div class="balance-box">
+            <div class="balance">💰 $<span id="balance">10000</span></div>
+            <div style="font-size: 0.8em; color: #888;">(每日登入自動發放 $10,000)</div>
+        </div>
+
+        <div class="reel-container">
+            <div class="slot" id="slot1"><ul class="reel-list"></ul></div>
+            <div class="slot" id="slot2"><ul class="reel-list"></ul></div>
+            <div class="slot" id="slot3"><ul class="reel-list"></ul></div>
+        </div>
+
+        <div>
+            <label>下注額 (上限 1000): </label><br>
+            <input type="number" id="betAmount" class="bet-input" value="100" min="1" max="1000">
+            <br>
+            <button class="spin-button" onclick="spin()">🎰 開始旋轉</button>
+        </div>
+        
+        <p class="result" id="result">祝你好運！</p>
+
+        <div class="rules-note">
+            ※ 獲獎邏輯：三連線依倍率計算 | 前二同 x2 | 任二同 x1.5
+        </div>
+    </div>
+
+    <script>
+        // --- 初始化參數 ---
+        const SYMBOLS_RAW = ['🍒', '🍋', '🔔', '💎', '7️⃣'];
+        const SYMBOLS_WEIGHTED = ['🍒','🍒','🍒','🍒','🍒','🍋','🍋','🍋','🍋','🔔','🔔','🔔','💎','💎','7️⃣'];
+        const WIN_MULTIPLIER = { '🍒': 5, '🍋': 10, '🔔': 20, '💎': 50, '7️⃣': 100 };
+
+        let balance = parseInt(localStorage.getItem('slot_balance')) || 10000;
+        let isSpinning = false;
+
+        // --- 音效物件設定 ---
+        // 提示：如果你有實體檔案，請將下方網址換成 'spin.mp3' 等檔名
+        const sounds = {
+            spin: new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3'),
+            win: new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3'),
+            lose: new Audio('https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3')
+        };
+
+        // 預載音效
+        Object.values(sounds).forEach(s => s.load());
+
+        // --- 核心邏輯 ---
+        function checkDailyBonus() {
+            const lastDate = localStorage.getItem('last_login_date');
+            const today = new Date().toDateString();
+            if (lastDate !== today) {
+                balance += 10000;
+                localStorage.setItem('last_login_date', today);
+                updateBalanceDisplay(0);
+                alert("🎁 每日登入獎勵！已贈送 $10,000！");
+            }
+        }
+
+        function updateBalanceDisplay(amount = 0) {
+            balance += amount;
+            document.getElementById('balance').innerText = balance.toLocaleString();
+            localStorage.setItem('slot_balance', balance);
+        }
+
+        function createReelList(reelId) {
+            const ul = document.querySelector(`#${reelId} .reel-list`);
+            ul.innerHTML = '';
+            for (let i = 0; i < 30; i++) {
+                const li = document.createElement('li');
+                li.innerText = SYMBOLS_RAW[Math.floor(Math.random() * SYMBOLS_RAW.length)];
+                ul.appendChild(li);
+            }
+        }
+
+        function spin() {
+            if (isSpinning) return;
+
+            const betInput = document.getElementById('betAmount');
+            let bet = parseInt(betInput.value);
+
+            if (isNaN(bet) || bet <= 0) { alert("請輸入有效金額"); return; }
+            if (bet > 1000) { bet = 1000; betInput.value = 1000; }
+            if (bet > balance) { alert("餘額不足"); return; }
+
+            // 啟動旋轉
+            isSpinning = true;
+            document.querySelector('.spin-button').disabled = true;
+            updateBalanceDisplay(-bet);
+            document.getElementById('result').innerText = "⚡ 旋轉中... ⚡";
+            document.getElementById('result').style.color = "#ffcc00";
+
+            // 播放旋轉音效
+            sounds.spin.currentTime = 0;
+            sounds.spin.play().catch(e => console.warn("音效播放受限"));
+
+            const finalSymbols = [];
+            const spinPromises = [];
+
+            for (let i = 1; i <= 3; i++) {
+                const reel = document.querySelector(`#slot${i} .reel-list`);
+                const targetSymbol = SYMBOLS_WEIGHTED[Math.floor(Math.random() * SYMBOLS_WEIGHTED.length)];
+                finalSymbols.push(targetSymbol);
+
+                const li = document.createElement('li');
+                li.innerText = targetSymbol;
+                reel.appendChild(li);
+
+                const duration = 2000 + (i * 500);
+                const offset = (reel.children.length - 1) * 120;
+
+                reel.style.transition = `transform ${duration}ms cubic-bezier(0.1, 0, 0.1, 1)`;
+                reel.style.transform = `translateY(-${offset}px)`;
+
+                spinPromises.push(new Promise(res => setTimeout(res, duration)));
+            }
+
+            Promise.all(spinPromises).then(() => {
+                isSpinning = false;
+                document.querySelector('.spin-button').disabled = false;
+                sounds.spin.pause(); // 停止旋轉音
+                checkWin(finalSymbols, bet);
+                
+                // 延遲重置轉盤位置，讓使用者看清楚結果
+                setTimeout(() => {
+                    for (let i = 1; i <= 3; i++) {
+                        const reel = document.querySelector(`#slot${i} .reel-list`);
+                        reel.style.transition = 'none';
+                        reel.style.transform = 'translateY(0)';
+                        createReelList(`slot${i}`);
+                    }
+                }, 1000);
+            });
+        }
+
+        function checkWin(symbols, bet) {
+            const [s1, s2, s3] = symbols;
+            let win = 0;
+            let msg = "銘謝惠顧 😢";
+
+            // 獲獎邏輯
+            if (s1 === s2 && s2 === s3) {
+                win = bet * WIN_MULTIPLIER[s1];
+                msg = `🎊 驚人大獎！${s1}${s1}${s1} 贏得 $${win}！`;
+            } else if (s1 === s2 || s1 === s3 || s2 === s3) {
+                win = Math.floor(bet * (s1 === s2 ? 2 : 1.5));
+                msg = `✨ 恭喜中獎！贏得 $${win}！`;
+            }
+
+            if (win > 0) {
+                updateBalanceDisplay(win);
+                document.getElementById('result').innerText = msg;
+                document.getElementById('result').style.color = "#00ffcc";
+                sounds.win.currentTime = 0;
+                sounds.win.play();
+            } else {
+                document.getElementById('result').innerText = msg;
+                document.getElementById('result').style.color = "#aaa";
+                sounds.lose.currentTime = 0;
+                sounds.lose.play();
+            }
+        }
+
+        // 啟動初始化
+        checkDailyBonus();
+        for (let i = 1; i <= 3; i++) createReelList(`slot${i}`);
+        updateBalanceDisplay(0);
+    </script>
+</body>
+</html>
